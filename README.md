@@ -1,10 +1,16 @@
 # ⚡ Light Infinity AI — Enterprise ERP & Business Intelligence (BI) Platform
 
-[![LinkedIn](https://shields.io)](https://www.linkedin.com/in/maria-gabriela-cojocaru/)
-![Python Version](https://shields.io)
-![Database](https://shields.io)
-![Package Manager](https://shields.io)
-![Code Quality](https://shields.io)
+<p align="left">
+  <a href="https://github.com/Codedchic25/light_infinity_ai_enterprise_erp" target="_blank">
+    <kbd>&nbsp;💼 <b>LinkedIn Profile</b>&nbsp;</kbd>
+  </a>
+  <kbd>&nbsp;🐍 <b>Python 3.12+</b>&nbsp;</kbd>
+  <kbd>&nbsp;☁️ <b>Neon PostgreSQL</b>&nbsp;</kbd>
+  <kbd>&nbsp;⚡ <b>Managed by UV</b>&nbsp;</kbd>
+  <kbd>&nbsp;🛠️ <b>Linter: Ruff</b>&nbsp;</kbd>
+</p>
+
+
 
 A high-performance, enterprise-grade resource planning (ERP) and transaction management system designed for industrial manufacturing environments. Built on **Domain-Driven Design (DDD)** principles and **Clean Architecture**, this platform decouples asynchronous public client ordering workflows from secure internal operational controls, synchronized live via a multi-tenant cloud data infrastructure.
 
