@@ -1,10 +1,10 @@
 # ⚡ Light Infinity AI — Enterprise ERP & Business Intelligence (BI) Platform
 
 [![LinkedIn](https://shields.io)](https://www.linkedin.com/in/maria-gabriela-cojocaru/)
-[![Python Version](https://shields.io)](https://python.org)
-[![Database](https://shields.io)](https://neon.tech)
-[![Package Manager](https://shields.io)](https://github.com)
-[![Code Quality](https://shields.io)](https://github.com)
+![Python Version](https://shields.io)
+![Database](https://shields.io)
+![Package Manager](https://shields.io)
+![Code Quality](https://shields.io)
 
 A high-performance, enterprise-grade resource planning (ERP) and transaction management system designed for industrial manufacturing environments. Built on **Domain-Driven Design (DDD)** principles and **Clean Architecture**, this platform decouples asynchronous public client ordering workflows from secure internal operational controls, synchronized live via a multi-tenant cloud data infrastructure.
 
