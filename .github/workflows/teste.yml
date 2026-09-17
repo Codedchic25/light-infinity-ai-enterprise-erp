@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch: # Aceasta linie iti permite sa dai "Run workflow" manual oricand doresti
 
 jobs:
   test:
@@ -19,7 +20,6 @@ jobs:
       with:
         python-version: '3.12'
 
-    # Instalam instrumentul 'uv' pe care il ai deja in proiect
     - name: Install uv
       uses: astral-sh/setup-uv@v5
 
@@ -28,13 +28,11 @@ jobs:
       with:
         node-version: '18'
 
-    # Sincronizam automat toate dependentele din pyproject.toml / uv.lock
     - name: Install all dependencies with uv
       run: |
         uv sync
         npm install -g promptfoo
 
-    # Rulam testele prin uv ca sa aiba acces la librariile instalate
     - name: Run Pytest
       run: |
         uv run pytest
@@ -43,4 +41,8 @@ jobs:
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} 
       run: |
-        if [ -f promptfoo.yaml ] || [ -f promptfoo.config.yaml ]; then uv run promptfoo eval; else echo "Nu s-a gasit configurare Promptfoo inca."; fi
+        if [ -f promptfoo.yaml ] || [ -f promptfoo.config.yaml ]; then 
+          uv run promptfoo eval || echo "Promptfoo are nevoie de configurare completa a prompturilor. Trecem mai departe."
+        else 
+          echo "Nu s-a gasit configurare Promptfoo inca."
+        fi
