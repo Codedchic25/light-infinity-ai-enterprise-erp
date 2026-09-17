@@ -1,291 +1,605 @@
+import hashlib
+import os
+import sys
+import time
+
 import streamlit as st
-import pandas as pd
-import plotly.express as px
-import requests
 
-# 1. Configurare Pagină Enterprise
-st.set_page_config(page_title="LIGHT INFINITY AI", page_icon="⚡", layout="wide")
+from app.core.base import Client
+from app.db.connection import SessionLocal
 
+# 1. Configurare inițială obligatorie
+st.set_page_config(page_title="Light Infinity AI ERP", layout="wide")
+
+
+# ==========================================
+# 2. FUNCȚIE CRIPTARE PAROLE
+# ==========================================
+def genereaza_hash_parola(password: str, email: str) -> str:
+    salt = email.lower().strip()
+    text_de_criptat = password + salt
+    return hashlib.sha256(text_de_criptat.encode("utf-8")).hexdigest()
+
+
+# ==========================================
+# 3. MANAGEMENT SESIUNE IMUN LA RESETARE & RERUN
+# ==========================================
+# Citim și blocăm starea direct din URL-ul browserului pentru persistență totală
+# Citim și blocăm starea direct din URL-ul browserului pentru persistență totală
+if "login_status" in st.query_params and st.query_params["login_status"] == "autentificat":
+    st.session_state["global_autentificat"] = True
+    if "global_user_email" not in st.session_state or not st.session_state["global_user_email"]:
+        st.session_state["global_user_email"] = st.query_params.get("user_email", "admin@erp.local")
+
+    # 🌟 REPARARE PERSISTENȚĂ PAGINĂ: Dacă există pagină salvată în URL, o păstrăm în sesiune
+    if "pagina_activa" in st.query_params and "pagina_curenta" not in st.session_state:
+        st.session_state["pagina_curenta"] = st.query_params["pagina_activa"]
+else:
+    if "global_autentificat" not in st.session_state:
+        st.session_state["global_autentificat"] = False
+    if "global_user_email" not in st.session_state:
+        st.session_state["global_user_email"] = ""
+
+# Scut de Securitate Global
+if not st.session_state["global_autentificat"]:
+    st.markdown("<style>[data-testid='stSidebar'] {display: none !important;}</style>", unsafe_allow_html=True)
+
+    col_l1, col_l2, col_l3 = st.columns(3)
+    with col_l2:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown(
+                "<h3 style='text-align:center; color:#00FFA3; font-family:Courier New;'>🔑 Sistem ERP</h3>",
+                unsafe_allow_html=True,
+            )
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            vrea_resetare = st.checkbox("🔄 Am uitat parola / Resetare cont", key="global_reset_toggle")
+
+            if not vrea_resetare:
+                st.markdown("<h5 style='color:#00FFA3;'>🔓 Autentificare</h5>", unsafe_allow_html=True)
+                email_input = st.text_input(
+                    "Adresă Email Utilizator:", placeholder="nume@exemplu.com...", key="login_email_main"
+                )
+                password = st.text_input(
+                    "Parolă:", type="password", placeholder="Introduceți parola...", key="login_pass_main"
+                )
+
+                btn_login = st.button("🔓 Conectare Securizată", key="login_btn_main", type="primary", width="stretch")
+
+                if btn_login:
+                    email_curat = email_input.strip().lower()
+                    if email_curat and password:
+                        db = SessionLocal()
+                        try:
+                            from sqlalchemy import func
+
+                            client = db.query(Client).filter(func.lower(Client.email) == email_curat).first()
+                            hash_introdus = genereaza_hash_parola(password, email_input.strip())
+
+                            if client and (getattr(client, "parola_hash", None) == hash_introdus):
+                                # Fixăm datele în sesiune
+                                st.session_state["global_autentificat"] = True
+                                st.session_state["global_user_email"] = client.email
+
+                                # Ancorăm starea direct în URL-ul browserului pentru imunitate la rerun
+                                st.query_params["login_status"] = "autentificat"
+                                st.query_params["user_email"] = client.email
+
+                                st.success("🔓 Conectare reușită!")
+                                st.rerun()
+                            else:
+                                time.sleep(0.5)
+                                st.error("❌ Email sau parolă incorectă.")
+                        except Exception as e:
+                            st.error(f"Eroare: {e}")
+                        finally:
+                            db.close()
+                    else:
+                        st.error("❌ Completează email-ul și parola.")
+            else:
+                st.markdown("<h5 style='color:#FF4B4B;'>🔄 Recuperare Parolă</h5>", unsafe_allow_html=True)
+                email_reset = st.text_input(
+                    "Confirmă Email-ul contului:", placeholder="email@exemplu.com...", key="global_reset_email"
+                )
+                noua_parola = st.text_input(
+                    "Noua Parolă Dorită:",
+                    type="password",
+                    placeholder="Introduceți noua parolă...",
+                    key="global_reset_pass",
+                )
+                pin_siguranta = st.text_input(
+                    "Cod Master PIN Admin:", type="password", placeholder="Codul din 4 cifre...", key="global_reset_pin"
+                )
+
+                btn_aplica_resetare = st.button(
+                    "💾 Salvează Noua Parolă", key="global_reset_submit_btn", type="primary", width="stretch"
+                )
+
+                if btn_aplica_resetare:
+                    email_r_curat = email_reset.strip().lower()
+                    if email_r_curat and noua_parola and pin_siguranta:
+                        if pin_siguranta == "1234":
+                            db = SessionLocal()
+                            try:
+                                from sqlalchemy import func
+
+                                client = db.query(Client).filter(func.lower(Client.email) == email_r_curat).first()
+                                hash_nou = genereaza_hash_parola(noua_parola, email_reset.strip())
+
+                                if client:
+                                    client.parola_hash = hash_nou
+                                    db.commit()
+                                    st.success("✅ Parolă actualizată! Debifează căsuța de sus pentru conectare.")
+                                else:
+                                    client_nou = Client(
+                                        nume="Administrator", email=email_reset.strip(), parola_hash=hash_nou
+                                    )
+                                    db.add(client_nou)
+                                    db.commit()
+                                    st.success("✅ Cont activat! Debifează căsuța de sus pentru conectare.")
+                            except Exception as e:
+                                st.error(f"Eroare la salvare: {e}")
+                            finally:
+                                db.close()
+                        else:
+                            st.error("❌ Codul Master PIN este incorect!")
+                    else:
+                        st.error("❌ Completează toate câmpurile.")
+    st.stop()
+
+# 4. Injectare CSS Ultra-Dark fără blocaje pe tabele
 st.markdown(
     """
     <style>
-        .reportview-container { background: #0A0E17; }
-        .sidebar .sidebar-content { background: #161F30; }
-        h1, h2, h3 { color: #00FFA3 !important; font-family: 'Courier New', monospace; }
-        .stMetric { background-color: #161F30; padding: 15px; border-radius: 8px; border: 1px solid #00FFA3; }
-        .candle-header { font-size: 4rem; text-align: left; }
+        .stApp, [data-testid="stAppViewContainer"], .main, .block-container {
+            background-color: #06090F !important;
+        }
+        [data-testid="stSidebar"], section[data-testid="stSidebar"] {
+            background-color: #0D131F !important;
+            min-width: 400px !important;
+            max-width: 400px !important;
+            border-right: 2px solid #00FFA3 !important;
+        }
+        h1, h2, h3, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+            color: #00FFA3 !important;
+            font-family: 'Courier New', monospace !important;
+        }
+        p, span, label, .stMarkdown p, li, [data-testid="stMetricLabel"] {
+            color: #FFFFFF !important;
+        }
     </style>
 """,
     unsafe_allow_html=True,
 )
 
-st.markdown('<div class="candle-header">🕯️</div>', unsafe_allow_html=True)
-st.title("⚡ LIGHT INFINITY AI - ENTERPRISE BI & ERP")
-st.caption("Management tranzactional sincron conectat la Neon PostgreSQL Cloud")
 
-# 2. Meniu de Navigare Lateral
-st.sidebar.header("🕹️ Panou Control Operational")
-app_mode = st.sidebar.selectbox(
-    "Alege Modulul Aplicatiei",
-    [
-        "Catalog Dynamic",
-        "Management Productie",
-        "Checkout & Plasare Comenzi",
-        "Interogari BI & Analize",
-    ],
-)
+# ==========================================
+# 2. ASIGURARE CĂI PYTHON & IMPORTURI
+# ==========================================
+cale_proiect = os.path.abspath(os.path.dirname(__file__))
+if cale_proiect not in sys.path:
+    sys.path.insert(0, cale_proiect)
 
-BACKEND_URL = "http://localhost:8000/api"
+# Importăm modulele oficiale din arhitectură
+try:
+    from app.modules.storefront.storefront_module import render_storefront_module
+except ImportError:
 
-# =========================================================================
-# MODULUL 1: CATALOG DINAMIC
-# =========================================================================
-if app_mode == "Catalog Dynamic":
-    st.subheader("🛍️ Catalog Produse Finit (Live din Cloud)")
-    try:
-        response = requests.get(
-            f"{BACKEND_URL}/products", proxies={"http": None, "https": None}, timeout=10
-        )
-        if response.status_code == 200:
-            products_data = response.json()
-            if products_data:
-                if isinstance(products_data, dict):
-                    products_data = [products_data]
-                df_prod = pd.DataFrame(products_data)
-
-                total_produse = len(df_prod)
-                stoc_total = (
-                    int(df_prod["stoc"].sum()) if "stoc" in df_prod.columns else 0
-                )
-                pret_mediu = (
-                    df_prod["pret"].mean() if "pret" in df_prod.columns else 0.0
-                )
-
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Total Produse Unice", total_produse)
-                col2.metric("Stoc Total Unitati", stoc_total)
-                col3.metric("Pret Mediu Lumanare", f"{pret_mediu:.2f} RON")
-                st.write("---")
-
-                cols_to_display = [
-                    "id_lumanare",
-                    "nume",
-                    "pret",
-                    "stoc",
-                    "parfum",
-                    "forma",
-                    "ceara",
-                    "culoare",
-                ]
-                existing_cols = [c for c in cols_to_display if c in df_prod.columns]
-                st.dataframe(df_prod[existing_cols], width="stretch")
-
-                st.write(" ")
-                st.markdown("### ⚠️ Alerte Management Stoc")
-                stoc_alertat = False
-                for _, row in df_prod.iterrows():
-                    if int(row["stoc"]) <= 20:
-                        st.error(
-                            f"🔴 **Stoc Critic!** Produsul **{row['nume']}** mai are doar **{row['stoc']}** bucăți în depozit. Recomandare: Generați un lot nou în Management Producție."
-                        )
-                        stoc_alertat = True
-                if not stoc_alertat:
-                    st.success("🟢 Toate produsele au stocuri optime pentru vânzare.")
-
-                if "nume" in df_prod.columns and "stoc" in df_prod.columns:
-                    color_param = "parfum" if "parfum" in df_prod.columns else None
-                    fig = px.bar(
-                        df_prod,
-                        x="nume",
-                        y="stoc",
-                        color=color_param,
-                        title="📊 Nivel Stocuri per Produs si Aroma",
-                        template="plotly_dark",
-                    )
-                    fig.update_traces(
-                        marker_line_color="#00FFA3", marker_line_width=1.5
-                    )
-                    st.plotly_chart(fig, width="stretch")
-            else:
-                st.info("Catalogul este gol. Inserati date folosind scriptul seed.py.")
-        else:
-            st.error(f"Eroare backend: {response.status_code}")
-    except Exception as e:
-        st.error(f"Nu s-a putut stabili conexiunea cu backend-ul: {e}")
-# =========================================================================
-# MODULUL 2: MANAGEMENT PRODUCȚIE
-# =========================================================================
-elif app_mode == "Management Productie":
-    st.subheader("🏭 Logistica & Consum Materii Prime")
-    try:
-        response = requests.get(
-            f"{BACKEND_URL}/materials",
-            proxies={"http": None, "https": None},
-            timeout=10,
-        )
-        if response.status_code == 200:
-            materials_data = response.json()
-            if materials_data:
-                if isinstance(materials_data, dict):
-                    materials_data = [materials_data]
-                df_mat = pd.DataFrame(materials_data)
-                st.write("### Materiale disponibile in depozit")
-                st.dataframe(df_mat, width="stretch")
-                st.write("---")
-                st.info(
-                    "Sistemul este pregatit pentru introducerea loturilor noi de productie."
-                )
-            else:
-                st.info("Nu exista materiale inregistrate.")
-        else:
-            st.error(f"Eroare materiale: {response.status_code}")
-    except Exception as e:
-        st.error(f"Eroare la incarcarea stocului de materiale: {e}")
+    def render_storefront_module():
+        st.warning("Modulul Magazin Online E-Shop nu este complet disponibil.")
 
 
-# =========================================================================
-# MODULUL 3: CHECKOUT & PLASARE COMENZI
-# =========================================================================
-elif app_mode == "Checkout & Plasare Comenzi":
-    st.subheader("🛒 Checkout - Sistem Transformațional Comenzi Clienți")
-    st.write(
-        "Introduceți datele necesare pentru a genera o vânzare live cu descărcare directă din stoc."
+try:
+    from app.modules.bi.bi_module import render_bi_module
+except ImportError:
+
+    def render_bi_module():
+        st.warning("Modulul BI nu este complet.")
+
+
+try:
+    from app.modules.orders.orders_module import render_orders_module
+except ImportError:
+
+    def render_orders_module():
+        st.warning("Modulul Orders nu este complet.")
+
+
+try:
+    from app.modules.production.production_module import render_production_module
+except ImportError:
+
+    def render_production_module():
+        st.warning("Modulul Production nu este disponibil.")
+
+
+try:
+    from app.modules.products.products_module import render_products_module
+except ImportError:
+
+    def render_products_module():
+        st.warning("Modulul Products nu este disponibil.")
+
+
+try:
+    from app.modules.laborator.laborator_module import render_laborator_module
+except ImportError:
+
+    def render_laborator_module():
+        st.warning("Modulul Laborator AI nu este disponibil.")
+
+
+# IMPORTANT: Aceasta trebuie să fie prima instrucțiune Streamlit apelată!
+st.set_page_config(page_title="Light Infinity AI ERP", layout="wide")
+
+
+# ==========================================
+# FUNCȚII AJUTĂTOARE PENTRU CRIPTARE PAROLE
+# ==========================================
+def genereaza_hash_parola(password: str, email: str) -> str:
+    """Creează un hash securizat SHA-256 folosinc email-ul ca salt."""
+    salt = email.lower().strip()
+    text_de_criptat = password + salt
+    return hashlib.sha256(text_de_criptat.encode("utf-8")).hexdigest()
+
+
+# ==========================================
+# 3. SCUT DE SECURITATE GLOBAL ERP (BLOCARE TOTALĂ)
+# ==========================================
+if "global_autentificat" not in st.session_state:
+    st.session_state.global_autentificat = False
+if "global_user_email" not in st.session_state:
+    st.session_state.global_user_email = ""
+if not st.session_state.global_autentificat:
+    # Ascundem sidebar-ul când nu suntem conectați
+    st.markdown(
+        """
+        <style>
+            [data-testid="stSidebar"] {display: none !important;}
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
-    produse_checkout = {}
-    try:
-        response = requests.get(
-            f"{BACKEND_URL}/products", proxies={"http": None, "https": None}, timeout=5
-        )
-        if response.status_code == 200 and response.json():
-            for prod in response.json():
-                if int(prod.get("stoc", 0)) > 0:
-                    produse_checkout[prod["nume"]] = {
-                        "id": prod["id_lumanare"],
-                        "pret": float(prod["pret"]),
-                        "stoc": int(prod["stoc"]),
-                    }
-    except Exception as e:
-        st.error(f"Eroare încărcare catalog produse: {e}")
-
-    if warme_check := produse_checkout:
-        with st.form("form_checkout_operational"):
-            st.markdown("### 👤 Informații Client")
-            nume_client = st.text_input("Nume Complet Client")
-            telefon_client = st.text_input("Număr Telefon contact")
-
-            st.markdown("### 📦 Configurare Tranzacție")
-            produs_selectat = st.selectbox(
-                "Alege Lumânarea", list(produse_checkout.keys())
+    col_l1, col_l2, col_l3 = st.columns(3)
+    with col_l2:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown(
+                "<h3 style='text-align:center; color:#00FFA3; font-family:Courier New;'>🔑 Sistem ERP</h3>",
+                unsafe_allow_html=True,
             )
+            st.markdown("<br>", unsafe_allow_html=True)
 
-            detalii = produse_checkout[produs_selectat]
-            st.info(
-                f"Preț standard unitar: {detalii['pret']} RON | Stoc disponibil actual: {detalii['stoc']} bucăți"
-            )
+            # Căsuța care activează sau ascunde formularul de resetare
+            vrea_resetare = st.checkbox("🔄 Am uitat parola / Resetare cont", key="global_reset_toggle")
 
-            cantitate = st.number_input(
-                "Unități cumpărate", min_value=1, max_value=detalii["stoc"], step=1
-            )
-
-            st.markdown("---")
-            total_facturat = cantitate * detalii["pret"]
-            st.metric("Total General Facturat (Ramburs)", f"{total_facturat:.2f} RON")
-
-            apasat_comanda = st.form_submit_button(
-                "🔒 Confirmă Vânzarea și Scade din Inventar"
-            )
-
-        if apasat_comanda:
-            if not nume_client or not telefon_client:
-                st.error(
-                    "Numele și numărul de telefon sunt câmpuri absolut obligatorii!"
+            if vrea_resetare:
+                # ==========================================
+                # FORMULAR INDEPENDENT DE RESETARE
+                # ==========================================
+                st.markdown("<h5 style='color:#FF4B4B;'>🔄 Recuperare Parolă</h5>", unsafe_allow_html=True)
+                email_reset = st.text_input(
+                    "Confirmă Email-ul contului:", placeholder="email@exemplu.com...", key="global_reset_email"
                 )
-            else:
-                payload = {
-                    "nume_client": nume_client,
-                    "telefon": telefon_client,
-                    "id_lumanare": detalii["id"],
-                    "cantitate": int(cantitate),
-                    "pret_unitar": float(detalii["pret"]),
-                }
-                try:
-                    res_comanda = requests.post(
-                        f"{BACKEND_URL}/orders",
-                        json=payload,
-                        proxies={"http": None, "https": None},
-                        timeout=10,
-                    )
-                    if res_comanda.status_code == 200:
-                        st.success(
-                            f"🎉 {res_comanda.json().get('message', 'Comandă procesată cu succes!')}"
-                        )
-                        st.balloons()
-                        st.rerun()
+                noua_parola = st.text_input(
+                    "Noua Parolă Dorită:",
+                    type="password",
+                    placeholder="Introduceți noua parolă...",
+                    key="global_reset_pass",
+                )
+                pin_siguranta = st.text_input(
+                    "Cod Master PIN Admin:", type="password", placeholder="Codul din 4 cifre...", key="global_reset_pin"
+                )
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                btn_aplica_resetare = st.button(
+                    "💾 Salvează Noua Parolă", key="global_reset_submit_btn", type="primary", width="stretch"
+                )
+
+                if btn_aplica_resetare:
+                    email_r_curat = email_reset.strip().lower()
+                    if email_r_curat and noua_parola and pin_siguranta:
+                        if pin_siguranta == "1234":
+                            db = SessionLocal()
+                            try:
+                                from sqlalchemy import func
+
+                                client = db.query(Client).filter(func.lower(Client.email) == email_r_curat).first()
+                                hash_nou = genereaza_hash_parola(noua_parola, email_reset.strip())
+
+                                if client:
+                                    client.parola_hash = hash_nou
+                                    db.commit()
+                                    st.success("✅ Parolă actualizată! Debifează căsuța de sus pentru a te conecta.")
+                                else:
+                                    # Creăm contul pe loc dacă nu exista în baza de date
+                                    client_nou = Client(
+                                        nume="Administrator", email=email_reset.strip(), parola_hash=hash_nou
+                                    )
+                                    db.add(client_nou)
+                                    db.commit()
+                                    st.success(
+                                        "✅ Cont administrator activat! Debifează căsuța de sus pentru a te conecta."
+                                    )
+                            except Exception as e:
+                                st.error(f"Eroare la salvare: {e}")
+                            finally:
+                                db.close()
+                        else:
+                            st.error("❌ Codul Master PIN este incorect!")
                     else:
-                        st.error(
-                            f"Eroare procesare API: {res_comanda.json().get('detail', res_comanda.text)}"
-                        )
-                except Exception as e:
-                    st.error(f"Eroare conexiune server de date: {e}")
-    else:
-        st.warning(
-            "Stocurile sunt epuizate. Nu se pot plasa tranzacții în acest moment."
-        )
+                        st.error("❌ Completează toate câmpurile pentru resetare.")
 
-    st.write("---")
-    st.write("### 📜 Registru Tranzacții & Comenzi Recente")
-    try:
-        res_orders = requests.get(
-            f"{BACKEND_URL}/orders", proxies={"http": None, "https": None}, timeout=5
-        )
-        if res_orders.status_code == 200:
-            orders_data = res_orders.json()
-            if orders_data:
-                df_orders = pd.DataFrame(orders_data)
-                df_orders.columns = [
-                    "ID Comandă",
-                    "Nume Client",
-                    "Telefon",
-                    "Dată Plasare",
-                    "Status",
-                    "Total (RON)",
-                ]
-                st.dataframe(df_orders, width="stretch")
             else:
-                st.info("Nu există comenzi salvate în baza de date până acum.")
-    except Exception as e:
-        st.caption(
-            f"Registrul tranzacțiilor va deveni complet funcțional la activarea rutei de citire. Stare: {e}"
-        )
+                # ==========================================
+                # FORMULAR DE CONECTARE NORMALĂ
+                # ==========================================
+                st.markdown("<h5 style='color:#00FFA3;'>🔓 Autentificare</h5>", unsafe_allow_html=True)
+                email_input = st.text_input(
+                    "Adresă Email Utilizator:", placeholder="nume@exemplu.com...", key="global_login_email"
+                )
+                password = st.text_input(
+                    "Parolă:", type="password", placeholder="Introduceți parola...", key="global_login_pass"
+                )
+
+                st.checkbox("💾 Ține-mă minte pe acest dispozitiv", key="global_remember")
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                btn_login = st.button(
+                    "🔓 Conectare Securizată", key="global_login_btn", type="primary", width="stretch"
+                )
+
+                if btn_login:
+                    email_curat = email_input.strip().lower()
+                    if email_curat and "@" in email_curat and password:
+                        db = SessionLocal()
+                        try:
+                            from sqlalchemy import func
+
+                            client = db.query(Client).filter(func.lower(Client.email) == email_curat).first()
+                            hash_introdus = genereaza_hash_parola(password, email_input.strip())
+
+                            if client:
+                                hash_salvat = getattr(client, "parola_hash", None)
+                                if hash_salvat == hash_introdus:
+                                    # 🔒 BLOCARE SESIUNE - Stabilă la orice rerun
+                                    st.session_state["global_autentificat"] = True
+                                    st.session_state["global_user_email"] = client.email
+                                    st.success("🔓 Conectare reușită! Se încarcă...")
+                                    st.rerun()
+                                else:
+                                    time.sleep(0.5)
+                                    st.error("❌ Email sau parolă incorectă.")
+                            else:
+                                time.sleep(0.5)
+                                st.error("❌ Acest cont nu există în baza de date.")
+                        except Exception as e:
+                            st.error(f"Eroare la conectare: {e}")
+                        finally:
+                            db.close()
+                    else:
+                        st.error("❌ Introdu o adresă de email validă și parola.")
+
+    st.stop()
+
+# ==========================================
+# 4. INJECTARE DIRECTĂ ULTRA-DARK & LIZIBILITATE TOTALĂ (CSS)
+# ==========================================
+st.markdown(
+    """
+    <style>
+        .stApp, [data-testid="stAppViewContainer"], .main, .block-container {
+            background-color: #06090F !important;
+        }
+
+        [data-testid="stSidebar"],
+        [data-testid="stSidebarUserContent"],
+        [data-testid="stSidebarNav"],
+        section[data-testid="stSidebar"] {
+            background-color: #0D131F !important;
+            background: #0D131F !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stSidebar"] {
+            min-width: 400px !important;
+            max-width: 400px !important;
+            border-right: 2px solid #00FFA3 !important;
+        }
+
+        [data-testid="stSidebarUserContent"] {
+            padding-top: 2rem !important;
+            padding-left: 1.5rem !important;
+            padding-right: 1.5rem !important;
+        }
+
+        h1, h2, h3, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+            color: #00FFA3 !important;
+            font-family: 'Courier New', monospace !important;
+            text-shadow: 0 0 10px rgba(0, 255, 163, 0.5) !important;
+        }
+
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] label,
+        [data-testid="stSidebar"] span,
+        [data-testid="stSidebar"] h2,
+        [data-testid="stSidebar"] h1 {
+            color: #FFFFFF !important;
+            font-weight: bold !important;
+        }
+
+        .stSelectbox div[data-baseweb="select"] {
+            background-color: #161F30 !important;
+            border: 2px solid #00FFA3 !important;
+            border-radius: 8px !important;
+            padding: 2px 6px !important;
+        }
+
+        .stSelectbox div[data-baseweb="select"] [data-testid="stMarkdownContainer"] p,
+        .stSelectbox div[data-baseweb="select"] span,
+        .stSelectbox div[data-baseweb="select"] div {
+            color: #00FFA3 !important;
+            font-weight: bold !important;
+            font-size: 1.05rem !important;
+        }
+
+        div[data-baseweb="popover"],
+        div[role="listbox"],
+        ul[role="listbox"],
+        div[data-baseweb="menu"] {
+            background-color: #0D131F !important;
+            background: #0D131F !important;
+            border: 2px solid #00FFA3 !important;
+            border-radius: 8px !important;
+        }
+
+        li[role="option"],
+        li[role="option"] div,
+        li[role="option"] span,
+        [data-baseweb="menu"] li,
+        [role="option"] * {
+            color: #FFFFFF !important;
+            -webkit-text-fill-color: #FFFFFF !important;
+            font-weight: 600 !important;
+            font-size: 1.05rem !important;
+        }
+
+        li[role="option"], [data-baseweb="menu"] li {
+            background-color: #0D131F !important;
+            background: #0D131F !important;
+        }
+
+        li[role="option"]:hover,
+        li[role="option"]:hover div,
+        li[role="option"]:hover span,
+        li[role="option"]:hover *,
+        [data-baseweb="menu"] li:hover {
+            background-color: #161F30 !important;
+            background: #161F30 !important;
+            color: #00FFA3 !important;
+            -webkit-text-fill-color: #00FFA3 !important;
+            cursor: pointer;
+        }
+
+        p, span, label, .stMarkdown p, li, [data-testid="stMetricLabel"] {
+            color: #FFFFFF !important;
+            font-weight: 500 !important;
+        }
+
+        .stDataFrame, [data-testid="stDataFrameDataViewController"], div[data-testid="stDataFrame"] {
+            background-color: #0D131F !important;
+            border: 2px solid #00FFA3 !important;
+            border-radius: 8px !important;
+        }
+
+        div[data-testid="stDataFrame"] table, div[data-testid="stDataFrame"] div {
+            color: #FFFFFF !important;
+        }
+
+        [data-testid="stTable"] td, [data-testid="stTable"] th {
+            color: #FFFFFF !important;
+            background-color: #0D131F !important;
+        }
+
+        div[data-testid="stAlert"] p, div[data-testid="stAlert"] span, div[data-testid="stAlert"] label {
+            color: #000000 !important;
+            font-weight: bold !important;
+        }
+
+        .stMetric {
+            background-color: #0D131F !important;
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #00FFA3 !important;
+            box-shadow: 0 0 15px rgba(0, 255, 163, 0.2) !important;
+        }
+
+        [data-testid="stMetricValue"] div {
+            color: #00FFA3 !important;
+            font-family: 'Courier New', monospace !important;
+        }
+
+        .candle-header {
+            font-size: 4rem;
+            text-align: left;
+            margin-bottom: -20px;
+        }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
 
 
-# =========================================================================
-# MODULUL 4: INTEROGĂRI BI & ANALIZE
-# =========================================================================
-elif app_mode == "Interogari BI & Analize":
-    st.subheader("📈 Interogari Avansate BI (Nivel 1-3)")
+# Zona din Dreapta (Conținut principal)
+st.markdown('<div class="candle-header">🕯️</div>', unsafe_allow_html=True)
+st.title("⚡ LIGHT INFINITY AI - ENTERPRISE")
+st.caption("Management tranzactional sincron conectat la SQLite Local")
+st.markdown("---")
 
-    try:
-        response = requests.get(
-            f"{BACKEND_URL}/bi/stats", proxies={"http": None, "https": None}, timeout=5
-        )
+# ==========================================
+# 5. MENIU OPERAȚIONAL CONSTRUIT ÎN STÂNGA (PERSISTENȚĂ 100%)
+# ==========================================
+st.sidebar.title("🕹️ Panou Control")
+st.sidebar.markdown(f"👤 Utilizator conectat: `{st.session_state.global_user_email}`")
+st.sidebar.markdown("<br>", unsafe_allow_html=True)
 
-        if response.status_code == 200:
-            bi_data = response.json()
-            valoare_reala = bi_data.get("valoare_inventar", 1075.00)
-            rata_ceara = bi_data.get("rata_consum_ceara", 5.50)
+# Definim lista oficială de module ERP
+opțiuni_module = [
+    "🛍️ Magazin Online E-Shop",
+    "📦 Catalog Dynamic",
+    "🏭 Management Production",
+    "🛒 Checkout & Plasare Comenzi",
+    "📈 Interogari BI & Analize",
+    "🧪 Rețete & Laborator AI",
+]
 
-            col1, col2 = st.columns(2)
-            col1.metric("Valoare Totala Inventar", f"{valoare_reala:,.2f} RON")
-            col2.metric("Rata Consum Ceara", f"{rata_ceara:.2f} kg / lot")
-        else:
-            col1, col2 = st.columns(2)
-            col1.metric("Valoare Totala Inventar", "1,075.00 RON")
-            col2.metric("Rata Consum Ceara", "5.50 kg / lot")
+# Calculăm indexul implicit bazat pe ce avem deja ancorat în URL-ul browserului
+index_implicit = 0
+pagina_salvata_url = st.query_params.get("pagina_activa", "")
+if pagina_salvata_url in opțiuni_module:
+    index_implicit = opțiuni_module.index(pagina_salvata_url)
 
-    except Exception as e:
-        print(f"Modulul BI rulează în mod asigurat structural. Log: {e}")
-        col1, col2 = st.columns(2)
-        col1.metric("Valoare Totala Inventar", "1,075.00 RON")
-        col2.metric("Rata Consum Ceara", "5.50 kg / lot")
+# Renderiță dropdown-ul inteligent cu indexul persistent
+app_mode = st.sidebar.selectbox(
+    "Navighează prin modulele ERP:",
+    options=opțiuni_module,
+    index=index_implicit,
+    key="navigation_select_box",
+)
+
+# Sincronizăm instant URL-ul când operatorul schimbă manual modulul din meniu
+if st.query_params.get("pagina_activa", "") != app_mode:
+    st.query_params["pagina_activa"] = app_mode
+
+st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
+if st.sidebar.button("🚪 Deconectare Securizată", type="secondary", width="stretch"):
+    st.session_state["global_autentificat"] = False
+    st.session_state["global_user_email"] = ""
+    st.query_params.clear()
+    st.rerun()
+
+st.sidebar.markdown("---")
+st.sidebar.caption("Status Conexiune: **Bază Date Sincronizată**")
+
+# ==========================================
+# 6. RUTARE CĂTRE MODULE CURENTE
+# ==========================================
+if app_mode == "🛍️ Magazin Online E-Shop":
+    render_storefront_module()
+
+elif app_mode == "📦 Catalog Dynamic":
+    render_products_module()
+
+elif app_mode == "🏭 Management Production":
+    render_production_module()
+
+elif app_mode == "🛒 Checkout & Plasare Comenzi":
+    render_orders_module()
+
+elif app_mode == "📈 Interogari BI & Analize":
+    render_bi_module()
+
+elif app_mode == "🧪 Rețete & Laborator AI":
+    render_laborator_module()

@@ -30,3 +30,8 @@ ENV/
 *.njsproj
 *.sln
 *.swp
+
+# Local SQLite databases
+*.db
+# Generated invoices
+autogen_facturi/
